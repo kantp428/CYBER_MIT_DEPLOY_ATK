@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { jwtVerify } from "jose";
 import { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
 
@@ -47,6 +48,10 @@ const mapActualRow = (row: ActualHistoryRow) => ({
     row.fetched_at instanceof Date
       ? row.fetched_at.toISOString()
       : String(row.fetched_at),
+  fetched_at:
+    row.fetched_at instanceof Date
+      ? row.fetched_at.toISOString()
+      : String(row.fetched_at),
 });
 
 const parseNullableNumber = (value: unknown) => {
@@ -55,10 +60,53 @@ const parseNullableNumber = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : Number.NaN;
 };
 
+const requireAdminAuth = async (request: NextRequest) => {
+  const authHeader =
+    request.headers.get("authorization") ??
+    request.headers.get("Authorization");
+  const bearerToken = authHeader?.startsWith("Bearer ")
+    ? authHeader.slice("Bearer ".length)
+    : null;
+  const cookieToken = request.cookies.get("auth_token")?.value;
+  const token = bearerToken ?? cookieToken;
+
+  if (!token) {
+    return NextResponse.json({ message: "Missing token" }, { status: 401 });
+  }
+
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    return NextResponse.json(
+      { message: "JWT secret is not configured" },
+      { status: 500 },
+    );
+  }
+
+  try {
+    const { payload } = await jwtVerify(
+      token,
+      new TextEncoder().encode(secret),
+    );
+
+    if (payload.role !== "admin") {
+      return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+    }
+
+    return null;
+  } catch {
+    return NextResponse.json({ message: "Invalid token" }, { status: 401 });
+  }
+};
+
 export async function GET(
-  _: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ locationCode: string }> },
 ) {
+  const authError = await requireAdminAuth(request);
+  if (authError) {
+    return authError;
+  }
+
   const { locationCode } = await params;
 
   if (!locationCode) {
@@ -69,10 +117,15 @@ export async function GET(
   }
 
   try {
-    const location = await prisma.location.findUnique({
-      where: { code: locationCode },
-      select: { code: true },
-    });
+    const location =
+      (await prisma.location.findUnique({
+        where: { code: locationCode },
+        select: { id: true, code: true },
+      })) ??
+      (await prisma.location.findUnique({
+        where: { id: Number(locationCode) },
+        select: { id: true, code: true },
+      }));
 
     if (!location) {
       return NextResponse.json(
@@ -97,7 +150,7 @@ export async function GET(
         a.fetched_at
       FROM pm_actual a
       INNER JOIN location l ON l.id = a.location_id
-      WHERE l.code = ${locationCode}
+      WHERE l.id = ${location.id}
       ORDER BY a.date DESC
       LIMIT 14
     `);
@@ -116,9 +169,12 @@ export async function GET(
 }
 
 export async function POST(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ locationCode: string }> },
 ) {
+  const authError = await requireAdminAuth(request);
+  if (authError) return authError;
+
   const { locationCode } = await params;
 
   if (!locationCode) {
@@ -138,15 +194,37 @@ export async function POST(
       );
     }
 
-    const location = await prisma.location.findUnique({
-      where: { code: locationCode },
-      select: { id: true, code: true },
-    });
+    const location =
+      (await prisma.location.findUnique({
+        where: { code: locationCode },
+        select: { id: true, code: true },
+      })) ??
+      (await prisma.location.findUnique({
+        where: { id: Number(locationCode) },
+        select: { id: true, code: true },
+      }));
 
     if (!location) {
       return NextResponse.json(
         { message: "Location not found" },
         { status: 404 },
+      );
+    }
+
+    const exists = await prisma.$queryRaw<Array<{ exists_flag: number }>>(
+      Prisma.sql`
+        SELECT 1 AS exists_flag
+        FROM pm_actual
+        WHERE location_id = ${location.id}
+          AND date = CAST(${payload.date} AS DATE)
+        LIMIT 1
+      `,
+    );
+
+    if (exists.length > 0) {
+      return NextResponse.json(
+        { message: "มีข้อมูลของจังหวัดและวันที่นี้อยู่แล้ว" },
+        { status: 409 },
       );
     }
 
@@ -187,20 +265,19 @@ export async function POST(
       );
     }
 
-    // MySQL ไม่มี RETURNING ใช้ executeRaw + LAST_INSERT_ID() แทน
     await prisma.$executeRaw(Prisma.sql`
-      INSERT INTO pm_actual (
-        location_id, date, pm, temp, dew_point, humidity,
-        pressure, wind_speed, precipitation, wind_direction, fetched_at
-      )
-      VALUES (
-        ${location.id},
-        CAST(${payload.date} AS DATE),
-        ${pm}, ${temp}, ${dewPoint}, ${humidity},
-        ${pressure}, ${windSpeed}, ${precipitation}, ${windDirection},
-        ${fetchedAt}
-      )
-    `);
+  INSERT INTO pm_actual (
+    location_id, date, pm, temp, dew_point, humidity,
+    pressure, wind_speed, precipitation, wind_direction, fetched_at
+  )
+  VALUES (
+    ${location.id},
+    CAST(${payload.date} AS DATE),
+    ${pm}, ${temp}, ${dewPoint}, ${humidity},
+    ${pressure}, ${windSpeed}, ${precipitation}, ${windDirection},
+    ${fetchedAt}
+  )
+`);
 
     const insertedRows = await prisma.$queryRaw<ActualHistoryRow[]>(Prisma.sql`
       SELECT
@@ -210,8 +287,17 @@ export async function POST(
         pm, temp, dew_point, humidity, pressure,
         wind_speed, precipitation, wind_direction, fetched_at
       FROM pm_actual
-      WHERE id = LAST_INSERT_ID()
-    `);
+      WHERE location_id = ${location.id}
+        AND date = CAST(${payload.date} AS DATE)
+      LIMIT 1
+`);
+
+    if (!insertedRows[0]) {
+      return NextResponse.json(
+        { message: "Unable to retrieve created record" },
+        { status: 500 },
+      );
+    }
 
     return NextResponse.json(
       { locationCode: location.code, data: mapActualRow(insertedRows[0]) },
@@ -226,11 +312,8 @@ export async function POST(
     ) {
       const dbCode = (error.meta as { code?: string } | undefined)?.code;
       if (dbCode === "1062") {
-        // MySQL duplicate entry
         return NextResponse.json(
-          {
-            message: "Actual record already exists for this location and date",
-          },
+          { message: "มีข้อมูลของจังหวัดและวันที่นี้อยู่แล้ว" },
           { status: 409 },
         );
       }

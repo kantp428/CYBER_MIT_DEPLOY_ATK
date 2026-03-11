@@ -32,6 +32,7 @@ interface FilterDropdownProps {
   placeholder: string;
   searchPlaceholder: string;
   emptyMessage: string;
+  multiple?: boolean;
   clearButtonRightClassName?: string;
   className?: string;
 }
@@ -47,6 +48,7 @@ export function FilterDropdown({
   placeholder,
   searchPlaceholder,
   emptyMessage,
+  multiple = true,
   clearButtonRightClassName = "right-8",
   className,
 }: FilterDropdownProps) {
@@ -60,31 +62,35 @@ export function FilterDropdown({
     <>
       <span className="flex min-w-0 flex-1 items-center overflow-hidden">
         {selectedOptions.length > 0 ? (
-          <span className="flex min-w-0 flex-nowrap items-center gap-1 overflow-hidden">
-            {visibleOptions.map((option) => (
-              <Badge
-                key={option.value}
-                variant="secondary"
-                className="max-w-35 shrink-0 truncate border-transparent text-foreground"
-                style={
-                  option.color
-                    ? {
-                        backgroundColor: `${option.color}20`,
-                        borderColor: `${option.color}60`,
-                        color: option.color,
-                      }
-                    : undefined
-                }
-              >
-                {option.label}
-              </Badge>
-            ))}
-            {hiddenCount > 0 && (
-              <Badge variant="outline" className="shrink-0">
-                ...
-              </Badge>
-            )}
-          </span>
+          multiple ? (
+            <span className="flex min-w-0 flex-nowrap items-center gap-1 overflow-hidden">
+              {visibleOptions.map((option) => (
+                <Badge
+                  key={option.value}
+                  variant="secondary"
+                  className="max-w-35 shrink-0 truncate border-transparent text-foreground"
+                  style={
+                    option.color
+                      ? {
+                          backgroundColor: `${option.color}20`,
+                          borderColor: `${option.color}60`,
+                          color: option.color,
+                        }
+                      : undefined
+                  }
+                >
+                  {option.label}
+                </Badge>
+              ))}
+              {hiddenCount > 0 && (
+                <Badge variant="outline" className="shrink-0">
+                  ...
+                </Badge>
+              )}
+            </span>
+          ) : (
+            <span className="truncate text-left">{selectedOptions[0].label}</span>
+          )
         ) : (
           <span className="truncate text-left text-muted-foreground">
             {placeholder}
@@ -125,7 +131,10 @@ export function FilterDropdown({
                       <CommandItem
                         key={option.value}
                         value={option.label}
-                        onSelect={() => onToggle(option.value)}
+                        onSelect={() => {
+                          onToggle(option.value);
+                          if (!multiple) onOpenChange(false);
+                        }}
                         className="font-sans"
                       >
                         <Check
@@ -167,7 +176,7 @@ export function FilterDropdown({
             clearButtonRightClassName,
           )}
         >
-          Clear all
+          {multiple ? "Clear all" : "Clear"}
         </button>
       )}
     </div>

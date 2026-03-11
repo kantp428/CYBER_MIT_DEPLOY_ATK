@@ -9,18 +9,62 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { CloudFog, Home, MapPinned, Wind, BadgeInfo } from "lucide-react";
+import { CloudFog, Home, Settings, Wind, BadgeInfo } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 const items = [
   { title: "Home", url: "/", icon: Home },
   { title: "Pollution", url: "/pollution", icon: CloudFog },
   { title: "information", url: "/information", icon: BadgeInfo },
+  { title: "settings", url: "/settings", icon: Settings, roles: ["admin"] },
 ];
+
+  // const [isLogin,setIsLogin] = useState(false);
+
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const [role, setRole] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadRole = async () => {
+      try {
+        const response = await fetch("/api/auth/me", {
+          credentials: "include",
+        });
+        if (!response.ok) {
+          return;
+        }
+
+        const data = await response.json();
+        if (active) {
+          setRole(typeof data?.role === "string" ? data.role : null);
+        }
+      } catch {
+        // ignore auth errors here, just hide role-based items
+      }
+    };
+
+    loadRole();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const visibleItems = items.filter((item) => {
+    if (!item.roles) {
+      return true;
+    }
+    if (!role) {
+      return false;
+    }
+    return item.roles.includes(role);
+  });
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="py-4">
@@ -50,7 +94,7 @@ export function AppSidebar() {
           <SidebarGroupLabel>Application</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {items.map((item) => {
+              {visibleItems.map((item) => {
                 const isActive =
                   item.url === "/"
                     ? pathname === "/"
