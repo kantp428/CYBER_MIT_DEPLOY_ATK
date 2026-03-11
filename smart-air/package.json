@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3000",
+    "dev": "next dev -p 4000",
     "build": "next build",
     "postinstall": "prisma generate",
-    "start": "node server.mjs",
+    "start": "set PORT=4000&& set PUBLIC_HOST=10.210.190.242&& node server.mjs",
     "lint": "next lint"
   },
   "dependencies": {

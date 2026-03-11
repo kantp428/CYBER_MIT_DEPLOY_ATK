@@ -6,14 +6,16 @@ import next from "next";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOSTNAME || "0.0.0.0";
-const port = Number(process.env.PORT || 3000);
+const port = Number(process.env.PORT || 4000);
+const publicHost = process.env.PUBLIC_HOST || "10.210.190.242";
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const certDir = path.join(__dirname, "certs");
-const pfxPath = process.env.SSL_PFX_PATH || path.join(certDir, "localhost.pfx");
+const pfxPath =
+  process.env.SSL_PFX_PATH || path.join(certDir, "10.210.190.242.pfx");
 const pfxPassphrase = process.env.SSL_PFX_PASSPHRASE || "smart-air-local";
 const keyPath =
   process.env.SSL_KEY_PATH || path.join(certDir, "localhost-key.pem");
@@ -53,7 +55,7 @@ app
         handle(req, res);
       })
       .listen(port, hostname, () => {
-        console.log(`> HTTPS ready on https://localhost:${port}`);
+        console.log(`> HTTPS ready on https://${publicHost}:${port}`);
       });
   })
   .catch((error) => {
