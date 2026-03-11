@@ -6,7 +6,7 @@
     "dev": "next dev -p 4000",
     "build": "next build",
     "postinstall": "prisma generate",
-    "start": "set PORT=4000&& set PUBLIC_HOST=10.210.190.242&& node server.mjs",
+    "start": "set NODE_ENV=production&& node server.mjs",
     "lint": "next lint"
   },
   "dependencies": {
