@@ -1,0 +1,62 @@
+import fs from "node:fs";
+import https from "node:https";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import next from "next";
+
+const dev = process.env.NODE_ENV !== "production";
+const hostname = process.env.HOSTNAME || "0.0.0.0";
+const port = Number(process.env.PORT || 3000);
+const app = next({ dev, hostname, port });
+const handle = app.getRequestHandler();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const certDir = path.join(__dirname, "certs");
+const pfxPath = process.env.SSL_PFX_PATH || path.join(certDir, "localhost.pfx");
+const pfxPassphrase = process.env.SSL_PFX_PASSPHRASE || "smart-air-local";
+const keyPath =
+  process.env.SSL_KEY_PATH || path.join(certDir, "localhost-key.pem");
+const certPath = process.env.SSL_CERT_PATH || path.join(certDir, "localhost.pem");
+
+function readTlsFile(filePath, label) {
+  if (!fs.existsSync(filePath)) {
+    throw new Error(
+      `${label} not found at ${filePath}. Create the certificate files before running npm run start.`,
+    );
+  }
+
+  return fs.readFileSync(filePath);
+}
+
+function getTlsOptions() {
+  if (fs.existsSync(pfxPath)) {
+    return {
+      pfx: fs.readFileSync(pfxPath),
+      passphrase: pfxPassphrase,
+    };
+  }
+
+  return {
+    key: readTlsFile(keyPath, "SSL key"),
+    cert: readTlsFile(certPath, "SSL certificate"),
+  };
+}
+
+app
+  .prepare()
+  .then(() => {
+    const options = getTlsOptions();
+
+    https
+      .createServer(options, (req, res) => {
+        handle(req, res);
+      })
+      .listen(port, hostname, () => {
+        console.log(`> HTTPS ready on https://localhost:${port}`);
+      });
+  })
+  .catch((error) => {
+    console.error("Failed to start HTTPS server", error);
+    process.exit(1);
+  });
