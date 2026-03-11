@@ -68,7 +68,7 @@ export default function LoginPage() {
                 type="text"
                 autoComplete="username"
                 placeholder="yourname"
-                pattern="^[A-Za-z]+$"
+                pattern="^[A-Za-z0-9]+$"
                 title="Username must use English letters only (no spaces, quotes, or numbers)."
                 required
               />
@@ -85,8 +85,8 @@ export default function LoginPage() {
                 autoComplete="current-password"
                 placeholder="••••••••"
                 pattern="^[A-Za-z0-9]+$"
-                title="Password must be 1-20 characters and use letters and numbers only."
-                maxLength={20}
+                title="Password must be 1-25 characters and use letters and numbers only."
+                maxLength={25}
                 required
               />
             </div>

@@ -1,18 +1,27 @@
 import { SignJWT } from "jose";
 import { NextResponse } from "next/server";
-import { MOCK_USERS } from "@/lib/mock-auth";
+import prisma from "@/lib/prisma";
+import bcrypt from "bcryptjs";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const username = String(body?.username || "");
     const password = String(body?.password || "");
-    const user = MOCK_USERS.find(
-      (mockUser) =>
-        mockUser.username === username && mockUser.password === password,
-    );
+    const account = await prisma.account.findUnique({
+      where: { username },
+      select: { id: true, username: true, password_hash: true, role: true },
+    });
 
-    if (!user) {
+    if (!account) {
+      return NextResponse.json(
+        { message: "Invalid credentials" },
+        { status: 401 },
+      );
+    }
+
+    const isMatch = await bcrypt.compare(password, account.password_hash);
+    if (!isMatch) {
       return NextResponse.json(
         { message: "Invalid credentials" },
         { status: 401 },
@@ -27,16 +36,17 @@ export async function POST(request: Request) {
       );
     }
 
-    const token = await new SignJWT({ role: user.role })
+    const role = account.role === "ADMIN" ? "admin" : "user";
+    const token = await new SignJWT({ role })
       .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-      .setSubject(user.id)
+      .setSubject(String(account.id))
       .setIssuedAt()
       .setExpirationTime("2h")
       .sign(new TextEncoder().encode(secret));
 
     const response = NextResponse.json({
       token,
-      user: { id: user.id, username: user.username, role: user.role },
+      user: { id: String(account.id), username: account.username, role },
     });
     response.cookies.set("auth_token", token, {
       httpOnly: true,
