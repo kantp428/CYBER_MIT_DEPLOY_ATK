@@ -1,17 +1,10 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
-
 import prisma from "@/lib/prisma";
 
 interface LatestActualRow {
   id: number;
   date: string;
-}
-
-interface PredictedPayloadItem {
-  predicted_for?: string;
-  pm_predicted?: number | null;
-  predicted_at?: string;
 }
 
 interface PredictedInsertRow {
@@ -23,10 +16,7 @@ interface PredictedInsertRow {
 }
 
 const parseNullableNumber = (value: unknown) => {
-  if (value === undefined || value === null || value === "") {
-    return null;
-  }
-
+  if (value === undefined || value === null || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : Number.NaN;
 };
@@ -36,7 +26,10 @@ const mapPredictedRow = (row: PredictedInsertRow) => ({
   pm_actual_id: row.pm_actual_id,
   predicted_for: row.predicted_for,
   pm_predicted: row.pm_predicted === null ? null : Number(row.pm_predicted),
-  predicted_at: row.predicted_at.toISOString(),
+  predicted_at:
+    row.predicted_at instanceof Date
+      ? row.predicted_at.toISOString()
+      : String(row.predicted_at),
 });
 
 export async function POST(
@@ -54,8 +47,18 @@ export async function POST(
 
   try {
     const body = (await request.json()) as
-      | PredictedPayloadItem[]
-      | { data?: PredictedPayloadItem[] };
+      | {
+          predicted_for?: string;
+          pm_predicted?: number | null;
+          predicted_at?: string;
+        }[]
+      | {
+          data?: {
+            predicted_for?: string;
+            pm_predicted?: number | null;
+            predicted_at?: string;
+          }[];
+        };
 
     const items = Array.isArray(body) ? body : body.data;
 
@@ -73,7 +76,6 @@ export async function POST(
           { status: 400 },
         );
       }
-
       const pmPredicted = parseNullableNumber(item.pm_predicted);
       if (Number.isNaN(pmPredicted)) {
         return NextResponse.json(
@@ -81,7 +83,6 @@ export async function POST(
           { status: 400 },
         );
       }
-
       if (
         item.predicted_at &&
         Number.isNaN(new Date(item.predicted_at).getTime())
@@ -94,10 +95,11 @@ export async function POST(
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      // แก้: ลบ ::text ออก ใช้ DATE_FORMAT แทน
       const actualRows = await tx.$queryRaw<LatestActualRow[]>(Prisma.sql`
         SELECT
           a.id,
-          a.date::text AS date
+          DATE_FORMAT(a.date, '%Y-%m-%d') AS date
         FROM pm_actual a
         INNER JOIN location l ON l.id = a.location_id
         WHERE l.code = ${locationCode}
@@ -106,12 +108,7 @@ export async function POST(
       `);
 
       const latestActual = actualRows[0];
-
-      if (!latestActual) {
-        return {
-          kind: "not_found" as const,
-        };
-      }
+      if (!latestActual) return { kind: "not_found" as const };
 
       const insertedRows: PredictedInsertRow[] = [];
 
@@ -119,9 +116,10 @@ export async function POST(
         const pmPredicted = parseNullableNumber(item.pm_predicted);
         const predictedAt = item.predicted_at
           ? new Date(item.predicted_at)
-          : null;
+          : new Date();
 
-        const rows = await tx.$queryRaw<PredictedInsertRow[]>(Prisma.sql`
+        // แก้: ลบ RETURNING ออก ใช้ executeRaw + LAST_INSERT_ID() แทน
+        await tx.$executeRaw(Prisma.sql`
           INSERT INTO pm_prediction (
             pm_actual_id,
             predicted_for,
@@ -130,26 +128,27 @@ export async function POST(
           )
           VALUES (
             ${latestActual.id},
-            ${item.predicted_for!}::date,
+            CAST(${item.predicted_for!} AS DATE),
             ${pmPredicted},
-            COALESCE(${predictedAt?.toISOString() ?? null}::timestamptz, NOW())
+            ${predictedAt}
           )
-          RETURNING
+        `);
+
+        const rows = await tx.$queryRaw<PredictedInsertRow[]>(Prisma.sql`
+          SELECT
             id,
             pm_actual_id,
-            predicted_for::text AS predicted_for,
+            DATE_FORMAT(predicted_for, '%Y-%m-%d') AS predicted_for,
             pm_predicted,
             predicted_at
+          FROM pm_prediction
+          WHERE id = LAST_INSERT_ID()
         `);
 
         insertedRows.push(rows[0]);
       }
 
-      return {
-        kind: "ok" as const,
-        latestActual,
-        insertedRows,
-      };
+      return { kind: "ok" as const, latestActual, insertedRows };
     });
 
     if (result.kind === "not_found") {
@@ -175,7 +174,8 @@ export async function POST(
       error.code === "P2010"
     ) {
       const dbCode = (error.meta as { code?: string } | undefined)?.code;
-      if (dbCode === "23505") {
+      if (dbCode === "1062") {
+        // MySQL duplicate entry code
         return NextResponse.json(
           {
             message:
