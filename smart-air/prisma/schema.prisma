@@ -3,16 +3,24 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mysql"
+}
+
+model account {
+  id            Int          @id @default(autoincrement())
+  username      String       @unique(map: "uq_account_username") @db.VarChar(50)
+  password_hash String       @db.VarChar(255)
+  role          account_role
+  created_at    DateTime     @default(now()) @db.DateTime(6)
 }
 
 model location {
   id         Int         @id @default(autoincrement())
-  code       String      @unique @db.VarChar(10)
+  code       String      @unique(map: "uq_location_code") @db.VarChar(10)
   province   String      @db.VarChar(100)
   latitude   Decimal?    @db.Decimal(9, 6)
   longitude  Decimal?    @db.Decimal(9, 6)
-  created_at DateTime    @default(now()) @db.Timestamptz(6)
+  created_at DateTime    @db.DateTime(6)
   pm_actual  pm_actual[]
 }
 
@@ -28,12 +36,12 @@ model pm_actual {
   wind_speed     Decimal?        @db.Decimal(5, 2)
   precipitation  Decimal?        @db.Decimal(6, 2)
   wind_direction Decimal?        @db.Decimal(5, 2)
-  fetched_at     DateTime        @default(now()) @db.Timestamptz(6)
-  location       location        @relation(fields: [location_id], references: [id], onUpdate: NoAction)
+  fetched_at     DateTime        @db.DateTime(6)
+  location       location        @relation(fields: [location_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_pm_actual_location")
   pm_prediction  pm_prediction[]
 
   @@unique([location_id, date], map: "uq_pm_actual_location_date")
-  @@index([date(sort: Desc)], map: "idx_pm_actual_date")
+  @@index([date], map: "idx_pm_actual_date")
   @@index([location_id], map: "idx_pm_actual_location_id")
 }
 
@@ -42,10 +50,15 @@ model pm_prediction {
   pm_actual_id  Int
   predicted_for DateTime  @db.Date
   pm_predicted  Decimal?  @db.Decimal(8, 4)
-  predicted_at  DateTime  @default(now()) @db.Timestamptz(6)
-  pm_actual     pm_actual @relation(fields: [pm_actual_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  predicted_at  DateTime  @db.DateTime(6)
+  pm_actual     pm_actual @relation(fields: [pm_actual_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_pm_prediction_actual")
 
   @@unique([pm_actual_id, predicted_for], map: "uq_pm_prediction_actual_date")
   @@index([pm_actual_id], map: "idx_pm_prediction_actual_id")
   @@index([predicted_for], map: "idx_pm_prediction_for")
+}
+
+enum account_role {
+  ADMIN
+  USER
 }
