@@ -134,6 +134,17 @@ export default function SettingsPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [isPredicting, setIsPredicting] = React.useState(false);
+  const [predictMessage, setPredictMessage] = React.useState<string | null>(
+    null,
+  );
+  const [predictLocationOpen, setPredictLocationOpen] =
+    React.useState(false);
+  const [selectedPredictLocations, setSelectedPredictLocations] =
+    React.useState<string[]>([]);
+  const [predictDate, setPredictDate] = React.useState<Date | undefined>(
+    undefined,
+  );
 
   React.useEffect(() => {
     setMounted(true);
@@ -145,10 +156,16 @@ export default function SettingsPage() {
   const toggleLocation = (value: string) =>
     setSelectedLocations((current) => (current.includes(value) ? [] : [value]));
 
+  const togglePredictLocation = (value: string) =>
+    setSelectedPredictLocations((current) =>
+      current.includes(value) ? [] : [value],
+    );
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
     setSuccess(null);
+    setPredictMessage(null);
 
     const locationId = selectedLocations[0];
     if (!locationId) {
@@ -204,117 +221,260 @@ export default function SettingsPage() {
     }
   };
 
+  const handlePredict = async () => {
+    setError(null);
+    setSuccess(null);
+    setPredictMessage(null);
+
+    const locationId = selectedPredictLocations[0];
+    if (!locationId) {
+      setPredictMessage("กรุณาเลือกจังหวัดก่อน");
+      return;
+    }
+    if (!predictDate) {
+      setPredictMessage("กรุณาเลือกวันที่");
+      return;
+    }
+
+    try {
+      setIsPredicting(true);
+      const response = await fetch("/api/pollution/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          locationId,
+          date: format(predictDate, "yyyy-MM-dd"),
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        setPredictMessage(data?.message ?? "ไม่สามารถพยากรณ์ได้");
+        return;
+      }
+
+      setPredictMessage("พยากรณ์สำเร็จ (สร้าง 7 record ใหม่)");
+    } catch {
+      setPredictMessage("ไม่สามารถพยากรณ์ได้");
+    } finally {
+      setIsPredicting(false);
+    }
+  };
+
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6">
       <div className="space-y-2">
         <h1 className="text-2xl font-semibold">Settings</h1>
         <p className="text-sm text-muted-foreground">
-          บันทึกข้อมูล PM actual สำหรับจังหวัดที่เลือก
+          บันทึกข้อมูล PM actual และพยากรณ์ PM 2.5
         </p>
       </div>
 
-      <form className="space-y-4 pb-3" onSubmit={handleSubmit}>
-        {/* จังหวัด */}
-        <div className="space-y-2">
-          <label className="text-sm font-medium">จังหวัด</label>
-          <FilterDropdown
-            mounted={mounted}
-            open={locationOpen}
-            onOpenChange={setLocationOpen}
-            options={locationOptions}
-            selectedValues={selectedLocations}
-            onToggle={toggleLocation}
-            onClear={() => setSelectedLocations([])}
-            placeholder={locationLoading ? "กำลังโหลด..." : "เลือกจังหวัด"}
-            searchPlaceholder="ค้นหาจังหวัด..."
-            emptyMessage="ไม่พบจังหวัดที่ค้นหา"
-          />
-        </div>
+      <div className="rounded-2xl border bg-card p-5 shadow-sm">
+        <h2 className="text-lg font-semibold">บันทึกข้อมูล PM actual</h2>
+        <p className="text-sm text-muted-foreground">
+          กรอกข้อมูล actual เพื่อใช้เป็นฐานสำหรับการพยากรณ์
+        </p>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          {/* Date picker */}
+        <form className="mt-4 space-y-4" onSubmit={handleSubmit}>
+          {/* จังหวัด */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium">จังหวัด</label>
+            <FilterDropdown
+              mounted={mounted}
+              open={locationOpen}
+              onOpenChange={setLocationOpen}
+              options={locationOptions}
+              selectedValues={selectedLocations}
+              onToggle={toggleLocation}
+              onClear={() => setSelectedLocations([])}
+              placeholder={locationLoading ? "กำลังโหลด..." : "เลือกจังหวัด"}
+              searchPlaceholder="ค้นหาจังหวัด..."
+              emptyMessage="ไม่พบจังหวัดที่ค้นหา"
+            />
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            {/* Date picker */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Date</label>
+              {mounted ? (
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !date && "text-muted-foreground",
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {date ? format(date, "PPP") : "เลือกวันที่"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar mode="single" selected={date} onSelect={setDate} />
+                  </PopoverContent>
+                </Popover>
+              ) : (
+                <Button
+                  variant="outline"
+                  className="w-full justify-start text-left font-normal text-muted-foreground"
+                  type="button"
+                  disabled
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  เลือกวันที่
+                </Button>
+              )}
+            </div>
+
+            {/* Fetched At */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Fetched At</label>
+              {mounted ? (
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !fetchedAt && "text-muted-foreground",
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {fetchedAt
+                        ? `${format(fetchedAt, "PPP")} ${fetchedAtTime}`
+                        : "เลือกวันที่และเวลา"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={fetchedAt}
+                      onSelect={setFetchedAt}
+                    />
+                    <div className="border-t p-3">
+                      <Input
+                        type="time"
+                        value={fetchedAtTime}
+                        onChange={(e) => setFetchedAtTime(e.target.value)}
+                      />
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              ) : (
+                <Button
+                  variant="outline"
+                  className="w-full justify-start text-left font-normal text-muted-foreground"
+                  type="button"
+                  disabled
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  เลือกวันที่และเวลา
+                </Button>
+              )}
+            </div>
+
+            {/* Numeric fields */}
+            {(Object.keys(FIELD_CONFIG) as FieldKey[]).map((key) => (
+              <NumericField
+                key={key}
+                fieldKey={key}
+                value={fields[key]}
+                onChange={setField(key)}
+              />
+            ))}
+          </div>
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          {success && <p className="text-sm text-green-600">{success}</p>}
+
+          <div className="flex justify-end">
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? "กำลังบันทึก..." : "บันทึกข้อมูล"}
+            </Button>
+          </div>
+        </form>
+      </div>
+
+      <div className="rounded-2xl border bg-card p-5 shadow-sm">
+        <h2 className="text-lg font-semibold">Predict PM 2.5</h2>
+        <p className="text-sm text-muted-foreground">
+          ใช้ข้อมูล actual ของวันที่เลือกเพื่อพยากรณ์ 7 วันถัดไป
+        </p>
+
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">จังหวัด</label>
+            <FilterDropdown
+              mounted={mounted}
+              open={predictLocationOpen}
+              onOpenChange={setPredictLocationOpen}
+              options={locationOptions}
+              selectedValues={selectedPredictLocations}
+              onToggle={togglePredictLocation}
+              onClear={() => setSelectedPredictLocations([])}
+              placeholder={locationLoading ? "กำลังโหลด..." : "เลือกจังหวัด"}
+              searchPlaceholder="ค้นหาจังหวัด..."
+              emptyMessage="ไม่พบจังหวัดที่ค้นหา"
+            />
+          </div>
+
           <div className="space-y-2">
             <label className="text-sm font-medium">Date</label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className={cn(
-                    "w-full justify-start text-left font-normal",
-                    !date && "text-muted-foreground",
-                  )}
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {date ? format(date, "PPP") : "เลือกวันที่"}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={date}
-                  onSelect={setDate}
-                  autoFocus
-                />
-              </PopoverContent>
-            </Popover>
-          </div>
-
-          {/* Fetched At */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Fetched At</label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className={cn(
-                    "w-full justify-start text-left font-normal",
-                    !fetchedAt && "text-muted-foreground",
-                  )}
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {fetchedAt
-                    ? `${format(fetchedAt, "PPP")} ${fetchedAtTime}`
-                    : "เลือกวันที่และเวลา"}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={fetchedAt}
-                  onSelect={setFetchedAt}
-                  autoFocus
-                />
-                <div className="border-t p-3">
-                  <Input
-                    type="time"
-                    value={fetchedAtTime}
-                    onChange={(e) => setFetchedAtTime(e.target.value)}
+            {mounted ? (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className={cn(
+                      "w-full justify-start text-left font-normal",
+                      !predictDate && "text-muted-foreground",
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {predictDate ? format(predictDate, "PPP") : "เลือกวันที่"}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={predictDate}
+                    onSelect={setPredictDate}
                   />
-                </div>
-              </PopoverContent>
-            </Popover>
+                </PopoverContent>
+              </Popover>
+            ) : (
+              <Button
+                variant="outline"
+                className="w-full justify-start text-left font-normal text-muted-foreground"
+                type="button"
+                disabled
+              >
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                เลือกวันที่
+              </Button>
+            )}
           </div>
-
-          {/* Numeric fields */}
-          {(Object.keys(FIELD_CONFIG) as FieldKey[]).map((key) => (
-            <NumericField
-              key={key}
-              fieldKey={key}
-              value={fields[key]}
-              onChange={setField(key)}
-            />
-          ))}
         </div>
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        {success && <p className="text-sm text-green-600">{success}</p>}
+        {predictMessage && (
+          <p className="mt-3 text-sm text-amber-600">{predictMessage}</p>
+        )}
 
-        <div className="flex justify-end">
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? "กำลังบันทึก..." : "บันทึกข้อมูล"}
+        <div className="mt-4 flex items-center justify-end">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={handlePredict}
+            disabled={isPredicting}
+          >
+            {isPredicting ? "กำลังพยากรณ์..." : "Predict"}
           </Button>
         </div>
-      </form>
+      </div>
     </div>
   );
 }

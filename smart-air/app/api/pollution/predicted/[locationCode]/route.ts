@@ -46,6 +46,8 @@ export async function POST(
   }
 
   try {
+    const { searchParams } = new URL(request.url);
+    const actualDateParam = searchParams.get("actual_date");
     const body = (await request.json()) as
       | {
           predicted_for?: string;
@@ -95,7 +97,6 @@ export async function POST(
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      // แก้: ลบ ::text ออก ใช้ DATE_FORMAT แทน
       const actualRows = await tx.$queryRaw<LatestActualRow[]>(Prisma.sql`
         SELECT
           a.id,
@@ -103,12 +104,22 @@ export async function POST(
         FROM pm_actual a
         INNER JOIN location l ON l.id = a.location_id
         WHERE l.code = ${locationCode}
+          ${
+            actualDateParam
+              ? Prisma.sql`AND a.date = CAST(${actualDateParam} AS DATE)`
+              : Prisma.empty
+          }
         ORDER BY a.date DESC
         LIMIT 1
       `);
 
       const latestActual = actualRows[0];
       if (!latestActual) return { kind: "not_found" as const };
+
+      await tx.$executeRaw(Prisma.sql`
+        DELETE FROM pm_prediction
+        WHERE pm_actual_id = ${latestActual.id}
+      `);
 
       const insertedRows: PredictedInsertRow[] = [];
 
