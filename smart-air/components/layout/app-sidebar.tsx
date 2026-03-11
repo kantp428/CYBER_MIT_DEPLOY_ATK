@@ -12,12 +12,16 @@ import {
 import { CloudFog, Home, MapPinned, Wind, BadgeInfo } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 const items = [
   { title: "Home", url: "/", icon: Home },
   { title: "Pollution", url: "/pollution", icon: CloudFog },
   { title: "information", url: "/information", icon: BadgeInfo },
 ];
+
+  // const [isLogin,setIsLogin] = useState(false);
+
 
 export function AppSidebar() {
   const pathname = usePathname();

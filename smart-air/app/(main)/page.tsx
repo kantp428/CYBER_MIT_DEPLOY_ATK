@@ -4,7 +4,7 @@ import { ArrowRight, MapPinned, ShieldCheck, Sparkles } from "lucide-react";
 import Link from "next/link";
 
 const HERO_IMAGE =
-  "https://media.discordapp.net/attachments/1348993034758652006/1480587515986706633/104904158_pam_4674.jpg?ex=69b03813&is=69aee693&hm=21a9d496829ee15b6a4c7a90d954606774cebba356a07e0236311f9f53ae586f&=&format=webp&width=1000&height=666";
+  "104904158_pam_4674.jpg";
 
 const featureItems = [
   {
