@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jwtVerify } from "jose";
 import { Prisma } from "@prisma/client";
-
 import prisma from "@/lib/prisma";
 
 interface ActualHistoryRow {
@@ -45,14 +44,14 @@ const mapActualRow = (row: ActualHistoryRow) => ({
   precipitation: row.precipitation === null ? null : Number(row.precipitation),
   wind_direction:
     row.wind_direction === null ? null : Number(row.wind_direction),
-  fetched_at: row.fetched_at.toISOString(),
+  fetched_at:
+    row.fetched_at instanceof Date
+      ? row.fetched_at.toISOString()
+      : String(row.fetched_at),
 });
 
 const parseNullableNumber = (value: unknown) => {
-  if (value === undefined || value === null || value === "") {
-    return null;
-  }
-
+  if (value === undefined || value === null || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : Number.NaN;
 };
@@ -130,7 +129,7 @@ export async function GET(
       SELECT
         a.id,
         a.location_id,
-        a.date::text AS date,
+        DATE_FORMAT(a.date, '%Y-%m-%d') AS date,
         a.pm,
         a.temp,
         a.dew_point,
@@ -153,7 +152,6 @@ export async function GET(
     });
   } catch (error) {
     console.error("Failed to load actual pollution history", error);
-
     return NextResponse.json(
       { message: "Unable to load actual pollution history" },
       { status: 500 },
@@ -230,79 +228,62 @@ export async function POST(
     const precipitation = parseNullableNumber(payload.precipitation);
     const windDirection = parseNullableNumber(payload.wind_direction);
 
-    const numericValues = [
-      pm,
-      temp,
-      dewPoint,
-      humidity,
-      pressure,
-      windSpeed,
-      precipitation,
-      windDirection,
-    ];
-
-    if (numericValues.some((value) => Number.isNaN(value))) {
+    if (
+      [
+        pm,
+        temp,
+        dewPoint,
+        humidity,
+        pressure,
+        windSpeed,
+        precipitation,
+        windDirection,
+      ].some((v) => Number.isNaN(v))
+    ) {
       return NextResponse.json(
         { message: "One or more numeric fields are invalid" },
         { status: 400 },
       );
     }
 
-    const fetchedAt = payload.fetched_at ? new Date(payload.fetched_at) : null;
-    if (payload.fetched_at && Number.isNaN(fetchedAt?.getTime())) {
+    const fetchedAt = payload.fetched_at
+      ? new Date(payload.fetched_at)
+      : new Date();
+    if (payload.fetched_at && Number.isNaN(fetchedAt.getTime())) {
       return NextResponse.json(
         { message: "Invalid fetched_at" },
         { status: 400 },
       );
     }
 
-    const insertedRows = await prisma.$queryRaw<ActualHistoryRow[]>(Prisma.sql`
+    // MySQL ไม่มี RETURNING ใช้ executeRaw + LAST_INSERT_ID() แทน
+    await prisma.$executeRaw(Prisma.sql`
       INSERT INTO pm_actual (
-        location_id,
-        date,
-        pm,
-        temp,
-        dew_point,
-        humidity,
-        pressure,
-        wind_speed,
-        precipitation,
-        wind_direction,
-        fetched_at
+        location_id, date, pm, temp, dew_point, humidity,
+        pressure, wind_speed, precipitation, wind_direction, fetched_at
       )
       VALUES (
         ${location.id},
-        ${payload.date}::date,
-        ${pm},
-        ${temp},
-        ${dewPoint},
-        ${humidity},
-        ${pressure},
-        ${windSpeed},
-        ${precipitation},
-        ${windDirection},
-        COALESCE(${fetchedAt?.toISOString() ?? null}::timestamptz, NOW())
+        CAST(${payload.date} AS DATE),
+        ${pm}, ${temp}, ${dewPoint}, ${humidity},
+        ${pressure}, ${windSpeed}, ${precipitation}, ${windDirection},
+        ${fetchedAt}
       )
-      RETURNING
+    `);
+
+    const insertedRows = await prisma.$queryRaw<ActualHistoryRow[]>(Prisma.sql`
+      SELECT
         id,
         location_id,
-        date::text AS date,
-        pm,
-        temp,
-        dew_point,
-        humidity,
-        pressure,
-        wind_speed,
-        precipitation,
-        wind_direction,
-        fetched_at
+        DATE_FORMAT(date, '%Y-%m-%d') AS date,
+        pm, temp, dew_point, humidity, pressure,
+        wind_speed, precipitation, wind_direction, fetched_at
+      FROM pm_actual
+      WHERE id = LAST_INSERT_ID()
     `);
 
     return NextResponse.json(
-      {
-        locationCode: location.code,
-        data: mapActualRow(insertedRows[0]),
-      },
+      { locationCode: location.code, data: mapActualRow(insertedRows[0]) },
       { status: 201 },
     );
   } catch (error) {
@@ -313,7 +294,8 @@ export async function POST(
       error.code === "P2010"
     ) {
       const dbCode = (error.meta as { code?: string } | undefined)?.code;
-      if (dbCode === "23505") {
+      if (dbCode === "1062") {
+        // MySQL duplicate entry
         return NextResponse.json(
           {
             message: "Actual record already exists for this location and date",

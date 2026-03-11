@@ -3,10 +3,7 @@ import { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { FALLBACK_FORECAST } from "@/lib/forecast-sample";
 
-const DAY_FORMATTER = new Intl.DateTimeFormat("en-US", {
-  weekday: "short",
-});
-
+const DAY_FORMATTER = new Intl.DateTimeFormat("en-US", { weekday: "short" });
 const DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
   day: "2-digit",
   month: "short",
@@ -16,7 +13,6 @@ const formatIsoDate = (date: Date) => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
-
   return `${year}-${month}-${day}`;
 };
 
@@ -24,19 +20,11 @@ const describeTrend = (
   current: number | null,
   previous: number | null,
 ): string => {
-  if (current === null || previous === null) {
-    return "ข้อมูลไม่พอ";
-  }
-
+  if (current === null || previous === null) return "ข้อมูลไม่พอ";
   const diff = current - previous;
-  if (Math.abs(diff) < 3) {
-    return "ทรงตัว";
-  }
-
-  if (diff > 0) {
+  if (Math.abs(diff) < 3) return "ทรงตัว";
+  if (diff > 0)
     return diff >= 10 ? "เพิ่มขึ้นอย่างมีนัยสำคัญ" : "เพิ่มขึ้นเล็กน้อย";
-  }
-
   return diff <= -10 ? "ลดลงอย่างมาก" : "ลดลงเล็กน้อย";
 };
 
@@ -86,7 +74,6 @@ export async function GET(
     if (locationId === FALLBACK_FORECAST.locationId) {
       return NextResponse.json(FALLBACK_FORECAST);
     }
-
     return NextResponse.json(
       { message: "Unable to load forecast data" },
       { status: 500 },
@@ -96,10 +83,7 @@ export async function GET(
   try {
     const location = await prisma.location.findUnique({
       where: { id: locationId },
-      select: {
-        id: true,
-        province: true,
-      },
+      select: { id: true, province: true },
     });
 
     if (!location) {
@@ -125,31 +109,28 @@ export async function GET(
     const actualRows = await prisma.$queryRaw<ActualRow[]>(Prisma.sql`
       SELECT
         id,
-        date::text AS date_text,
+        DATE_FORMAT(date, '%Y-%m-%d') AS date_text,
         pm
       FROM pm_actual
       WHERE location_id = ${locationId}
-        AND date BETWEEN ${actualStartText}::date AND ${yesterdayText}::date
+        AND date BETWEEN CAST(${actualStartText} AS DATE) AND CAST(${yesterdayText} AS DATE)
       ORDER BY date ASC
     `);
 
     const predictedRows = await prisma.$queryRaw<PredictedRow[]>(Prisma.sql`
       SELECT
         p.id,
-        p.predicted_for::text AS predicted_for_text,
+        DATE_FORMAT(p.predicted_for, '%Y-%m-%d') AS predicted_for_text,
         p.pm_predicted
       FROM pm_prediction p
       INNER JOIN pm_actual a ON a.id = p.pm_actual_id
       WHERE a.location_id = ${locationId}
-        AND a.date = ${yesterdayText}::date
-        AND p.predicted_for BETWEEN ${todayText}::date AND ${predictedEndText}::date
+        AND a.date = CAST(${yesterdayText} AS DATE)
+        AND p.predicted_for BETWEEN CAST(${todayText} AS DATE) AND CAST(${predictedEndText} AS DATE)
       ORDER BY p.predicted_for ASC
     `);
 
-    const actualMap = new Map(
-      actualRows.map((row) => [row.date_text, row]),
-    );
-
+    const actualMap = new Map(actualRows.map((row) => [row.date_text, row]));
     const predictedMap = new Map(
       predictedRows.map((row) => [row.predicted_for_text, row]),
     );
@@ -162,10 +143,8 @@ export async function GET(
       const iso = formatIsoDate(date);
       const row = actualMap.get(iso);
       const pm = row ? Number(row.pm) : null;
-
       const trend = describeTrend(pm, previousValue);
       previousValue = pm ?? previousValue;
-
       actualItems.push(
         buildForecastItem(row ? row.id : i + 1, "ACTUAL", date, pm, trend),
       );
@@ -178,10 +157,8 @@ export async function GET(
       const iso = formatIsoDate(date);
       const row = predictedMap.get(iso);
       const pm = row ? Number(row.pm_predicted) : null;
-
       const trend = describeTrend(pm, previousValue);
       previousValue = pm ?? previousValue;
-
       predictedItems.push(
         buildForecastItem(row ? row.id : i + 1, "PREDICTED", date, pm, trend),
       );

@@ -11,7 +11,6 @@ const parsePositiveInt = (value: string | null, fallback: number) => {
   if (Number.isFinite(parsed) && parsed >= 1) {
     return Math.floor(parsed);
   }
-
   return fallback;
 };
 
@@ -19,7 +18,6 @@ const formatIsoDate = (date: Date) => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
-
   return `${year}-${month}-${day}`;
 };
 
@@ -54,13 +52,15 @@ export async function GET(request: Request) {
     const todayText = formatIsoDate(todayDate);
     const yesterdayText = formatIsoDate(yesterdayDate);
 
-    const totalResult = await prisma.$queryRaw<Array<{ total: bigint | number }>>(
+    const totalResult = await prisma.$queryRaw<
+      Array<{ total: bigint | number }>
+    >(
       Prisma.sql`
         SELECT COUNT(*) AS total
         FROM pm_actual a
         INNER JOIN pm_prediction p ON p.pm_actual_id = a.id
-        WHERE a.date = ${yesterdayText}::date
-          AND p.predicted_for = ${todayText}::date
+        WHERE a.date = CAST(${yesterdayText} AS DATE)
+          AND p.predicted_for = CAST(${todayText} AS DATE)
       `,
     );
     const total = Number(totalResult[0]?.total ?? 0);
@@ -76,8 +76,8 @@ export async function GET(request: Request) {
       FROM pm_actual a
       INNER JOIN location l ON l.id = a.location_id
       INNER JOIN pm_prediction p ON p.pm_actual_id = a.id
-      WHERE a.date = ${yesterdayText}::date
-        AND p.predicted_for = ${todayText}::date
+      WHERE a.date = CAST(${yesterdayText} AS DATE)
+        AND p.predicted_for = CAST(${todayText} AS DATE)
       ORDER BY l.province ASC
       LIMIT ${normalizedLimit}
       OFFSET ${(normalizedPage - 1) * normalizedLimit}
@@ -115,10 +115,7 @@ export async function GET(request: Request) {
       totalPage: Math.max(1, Math.ceil(total / normalizedLimit)),
     };
 
-    const payload: PollutionPredictionResponse = {
-      data: rows,
-      pagination,
-    };
+    const payload: PollutionPredictionResponse = { data: rows, pagination };
 
     return NextResponse.json(payload);
   } catch (error) {
