@@ -58,7 +58,8 @@ const parseNullableNumber = (value: unknown) => {
 
 const requireAdminAuth = async (request: NextRequest) => {
   const authHeader =
-    request.headers.get("authorization") ?? request.headers.get("Authorization");
+    request.headers.get("authorization") ??
+    request.headers.get("Authorization");
   const bearerToken = authHeader?.startsWith("Bearer ")
     ? authHeader.slice("Bearer ".length)
     : null;
@@ -82,6 +83,10 @@ const requireAdminAuth = async (request: NextRequest) => {
       token,
       new TextEncoder().encode(secret),
     );
+
+    if (payload.role !== "admin") {
+      return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+    }
 
     return null;
   } catch {
@@ -164,9 +169,7 @@ export async function POST(
   { params }: { params: Promise<{ locationCode: string }> },
 ) {
   const authError = await requireAdminAuth(request);
-  if (authError) {
-    return authError;
-  }
+  if (authError) return authError;
 
   const { locationCode } = await params;
 
@@ -204,17 +207,19 @@ export async function POST(
       );
     }
 
-    const exists = await prisma.$queryRaw<Array<{ exists: number }>>(Prisma.sql`
-      SELECT 1 as exists
-      FROM pm_actual
-      WHERE location_id = ${location.id}
-        AND date = ${payload.date}::date
-      LIMIT 1
-    `);
+    const exists = await prisma.$queryRaw<Array<{ exists_flag: number }>>(
+      Prisma.sql`
+        SELECT 1 AS exists_flag
+        FROM pm_actual
+        WHERE location_id = ${location.id}
+          AND date = CAST(${payload.date} AS DATE)
+        LIMIT 1
+      `,
+    );
 
     if (exists.length > 0) {
       return NextResponse.json(
-        { message: "Actual record already exists for this location and date" },
+        { message: "มีข้อมูลของจังหวัดและวันที่นี้อยู่แล้ว" },
         { status: 409 },
       );
     }
@@ -256,20 +261,19 @@ export async function POST(
       );
     }
 
-    // MySQL ไม่มี RETURNING ใช้ executeRaw + LAST_INSERT_ID() แทน
     await prisma.$executeRaw(Prisma.sql`
-      INSERT INTO pm_actual (
-        location_id, date, pm, temp, dew_point, humidity,
-        pressure, wind_speed, precipitation, wind_direction, fetched_at
-      )
-      VALUES (
-        ${location.id},
-        CAST(${payload.date} AS DATE),
-        ${pm}, ${temp}, ${dewPoint}, ${humidity},
-        ${pressure}, ${windSpeed}, ${precipitation}, ${windDirection},
-        ${fetchedAt}
-      )
-    `);
+  INSERT INTO pm_actual (
+    location_id, date, pm, temp, dew_point, humidity,
+    pressure, wind_speed, precipitation, wind_direction, fetched_at
+  )
+  VALUES (
+    ${location.id},
+    CAST(${payload.date} AS DATE),
+    ${pm}, ${temp}, ${dewPoint}, ${humidity},
+    ${pressure}, ${windSpeed}, ${precipitation}, ${windDirection},
+    ${fetchedAt}
+  )
+`);
 
     const insertedRows = await prisma.$queryRaw<ActualHistoryRow[]>(Prisma.sql`
       SELECT
@@ -279,8 +283,17 @@ export async function POST(
         pm, temp, dew_point, humidity, pressure,
         wind_speed, precipitation, wind_direction, fetched_at
       FROM pm_actual
-      WHERE id = LAST_INSERT_ID()
-    `);
+      WHERE location_id = ${location.id}
+        AND date = CAST(${payload.date} AS DATE)
+      LIMIT 1
+`);
+
+    if (!insertedRows[0]) {
+      return NextResponse.json(
+        { message: "Unable to retrieve created record" },
+        { status: 500 },
+      );
+    }
 
     return NextResponse.json(
       { locationCode: location.code, data: mapActualRow(insertedRows[0]) },
@@ -295,11 +308,8 @@ export async function POST(
     ) {
       const dbCode = (error.meta as { code?: string } | undefined)?.code;
       if (dbCode === "1062") {
-        // MySQL duplicate entry
         return NextResponse.json(
-          {
-            message: "Actual record already exists for this location and date",
-          },
+          { message: "มีข้อมูลของจังหวัดและวันที่นี้อยู่แล้ว" },
           { status: 409 },
         );
       }

@@ -1,21 +1,114 @@
 "use client";
 
 import * as React from "react";
+import { format } from "date-fns";
+import { CalendarIcon } from "lucide-react";
 
 import { FilterDropdown } from "@/components/pollution/filter-dropdown";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
 import { useLocationOptions } from "@/hooks/use-location-options";
 
-const toNullableNumber = (value: string) => {
-  if (!value.trim()) {
-    return null;
-  }
+// ────────────────────────────────────────────────────────────
+// Field config
+// ────────────────────────────────────────────────────────────
+const FIELD_CONFIG = {
+  pm: { label: "PM", min: 0, max: 999, unit: "µg/m³" },
+  temp: { label: "Temp", min: 0, max: 60, unit: "°C" },
+  dew_point: { label: "Dew Point", min: 0, max: 40, unit: "°C" },
+  humidity: { label: "Humidity", min: 0, max: 100, unit: "%" },
+  pressure: { label: "Pressure", min: 800, max: 1100, unit: "hPa" },
+  wind_speed: { label: "Wind Speed", min: 0, max: 200, unit: "km/h" },
+  precipitation: { label: "Precipitation", min: 0, max: 500, unit: "mm" },
+  wind_direction: { label: "Wind Direction", min: 0, max: 360, unit: "°" },
+} as const;
 
+type FieldKey = keyof typeof FIELD_CONFIG;
+
+// ────────────────────────────────────────────────────────────
+// Helpers
+// ────────────────────────────────────────────────────────────
+const toNullableNumber = (value: string) => {
+  if (!value.trim()) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : Number.NaN;
 };
 
+const validateFields = (values: Record<FieldKey, string>): string | null => {
+  for (const key of Object.keys(FIELD_CONFIG) as FieldKey[]) {
+    const raw = values[key];
+    if (!raw.trim()) continue;
+
+    const num = Number(raw);
+    const { label, min, max, unit } = FIELD_CONFIG[key];
+
+    if (!Number.isFinite(num)) {
+      return `${label}: กรอกตัวเลขไม่ถูกต้อง`;
+    }
+    if (num < min) {
+      return `${label}: ต้องไม่น้อยกว่า ${min} ${unit}`;
+    }
+    if (num > max) {
+      return `${label}: ต้องไม่เกิน ${max} ${unit}`;
+    }
+  }
+  return null;
+};
+
+// ────────────────────────────────────────────────────────────
+// Sub-component
+// ────────────────────────────────────────────────────────────
+function NumericField({
+  fieldKey,
+  value,
+  onChange,
+}: {
+  fieldKey: FieldKey;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const { label, min, max, unit } = FIELD_CONFIG[fieldKey];
+  const num = value.trim() ? Number(value) : null;
+  const isInvalid =
+    num !== null && (!Number.isFinite(num) || num < min || num > max);
+
+  return (
+    <div className="space-y-2">
+      <label className="text-sm font-medium" htmlFor={fieldKey}>
+        {label}
+        <span className="ml-1 text-xs font-normal text-muted-foreground">
+          ({min}–{max} {unit})
+        </span>
+      </label>
+      <Input
+        id={fieldKey}
+        type="number"
+        min={min}
+        max={max}
+        step="0.01"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={cn(isInvalid && "border-red-500 focus-visible:ring-red-500")}
+      />
+      {isInvalid && (
+        <p className="text-xs text-red-500">
+          ต้องอยู่ระหว่าง {min}–{max} {unit}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Page
+// ────────────────────────────────────────────────────────────
 export default function SettingsPage() {
   const [mounted, setMounted] = React.useState(false);
   const [locationOpen, setLocationOpen] = React.useState(false);
@@ -25,16 +118,19 @@ export default function SettingsPage() {
   const { data: locationOptions, isLoading: locationLoading } =
     useLocationOptions();
 
-  const [date, setDate] = React.useState("");
-  const [pm, setPm] = React.useState("");
-  const [temp, setTemp] = React.useState("");
-  const [dewPoint, setDewPoint] = React.useState("");
-  const [humidity, setHumidity] = React.useState("");
-  const [pressure, setPressure] = React.useState("");
-  const [windSpeed, setWindSpeed] = React.useState("");
-  const [precipitation, setPrecipitation] = React.useState("");
-  const [windDirection, setWindDirection] = React.useState("");
-  const [fetchedAt, setFetchedAt] = React.useState("");
+  const [date, setDate] = React.useState<Date | undefined>(undefined);
+  const [fields, setFields] = React.useState<Record<FieldKey, string>>({
+    pm: "",
+    temp: "",
+    dew_point: "",
+    humidity: "",
+    pressure: "",
+    wind_speed: "",
+    precipitation: "",
+    wind_direction: "",
+  });
+  const [fetchedAt, setFetchedAt] = React.useState<Date | undefined>(undefined);
+  const [fetchedAtTime, setFetchedAtTime] = React.useState("00:00");
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
@@ -43,11 +139,11 @@ export default function SettingsPage() {
     setMounted(true);
   }, []);
 
-  const toggleLocation = (value: string) => {
-    setSelectedLocations((current) =>
-      current.includes(value) ? [] : [value],
-    );
-  };
+  const setField = (key: FieldKey) => (value: string) =>
+    setFields((prev) => ({ ...prev, [key]: value }));
+
+  const toggleLocation = (value: string) =>
+    setSelectedLocations((current) => (current.includes(value) ? [] : [value]));
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -59,38 +155,31 @@ export default function SettingsPage() {
       setError("กรุณาเลือกจังหวัดก่อน");
       return;
     }
-
     if (!date) {
       setError("กรุณาเลือกวันที่");
       return;
     }
 
-    const payload = {
-      date,
-      pm: toNullableNumber(pm),
-      temp: toNullableNumber(temp),
-      dew_point: toNullableNumber(dewPoint),
-      humidity: toNullableNumber(humidity),
-      pressure: toNullableNumber(pressure),
-      wind_speed: toNullableNumber(windSpeed),
-      precipitation: toNullableNumber(precipitation),
-      wind_direction: toNullableNumber(windDirection),
-      fetched_at: fetchedAt || null,
-    };
+    const validationError = validateFields(fields);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
 
-    const numericValues = Object.values(payload).filter(
-      (value) => typeof value === "number",
-    ) as number[];
-    const hasInvalidNumber = numericValues.some((value) => Number.isNaN(value));
-    if (hasInvalidNumber) {
-      setError("มีช่องตัวเลขที่กรอกไม่ถูกต้อง");
-      return;
-    }
-    const hasNegativeNumber = numericValues.some((value) => value < 0);
-    if (hasNegativeNumber) {
-      setError("ห้ามกรอกค่าติดลบ");
-      return;
-    }
+    const payload = {
+      date: format(date, "yyyy-MM-dd"),
+      pm: toNullableNumber(fields.pm),
+      temp: toNullableNumber(fields.temp),
+      dew_point: toNullableNumber(fields.dew_point),
+      humidity: toNullableNumber(fields.humidity),
+      pressure: toNullableNumber(fields.pressure),
+      wind_speed: toNullableNumber(fields.wind_speed),
+      precipitation: toNullableNumber(fields.precipitation),
+      wind_direction: toNullableNumber(fields.wind_direction),
+      fetched_at: fetchedAt
+        ? `${format(fetchedAt, "yyyy-MM-dd")}T${fetchedAtTime}:00`
+        : null,
+    };
 
     try {
       setIsSubmitting(true);
@@ -104,14 +193,13 @@ export default function SettingsPage() {
       if (!response.ok) {
         const data = await response.json().catch(() => null);
         setError(data?.message ?? "บันทึกข้อมูลไม่สำเร็จ");
-        setIsSubmitting(false);
         return;
       }
 
       setSuccess("บันทึกข้อมูลสำเร็จ");
-      setIsSubmitting(false);
     } catch {
       setError("บันทึกข้อมูลไม่สำเร็จ");
+    } finally {
       setIsSubmitting(false);
     }
   };
@@ -125,7 +213,8 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <form className="space-y-4" onSubmit={handleSubmit}>
+      <form className="space-y-4 pb-3" onSubmit={handleSubmit}>
+        {/* จังหวัด */}
         <div className="space-y-2">
           <label className="text-sm font-medium">จังหวัด</label>
           <FilterDropdown
@@ -143,141 +232,88 @@ export default function SettingsPage() {
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
+          {/* Date picker */}
           <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="date">
-              Date
-            </label>
-            <Input
-              id="date"
-              type="date"
-              value={date}
-              onChange={(event) => setDate(event.target.value)}
-              required
-            />
+            <label className="text-sm font-medium">Date</label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    "w-full justify-start text-left font-normal",
+                    !date && "text-muted-foreground",
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {date ? format(date, "PPP") : "เลือกวันที่"}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={date}
+                  onSelect={setDate}
+                  autoFocus
+                />
+              </PopoverContent>
+            </Popover>
           </div>
+
+          {/* Fetched At */}
           <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="pm">
-              PM
-            </label>
-            <Input
-              id="pm"
-              type="number"
-              min="0"
-              step="0.01"
-              value={pm}
-              onChange={(event) => setPm(event.target.value)}
-            />
+            <label className="text-sm font-medium">Fetched At</label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    "w-full justify-start text-left font-normal",
+                    !fetchedAt && "text-muted-foreground",
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {fetchedAt
+                    ? `${format(fetchedAt, "PPP")} ${fetchedAtTime}`
+                    : "เลือกวันที่และเวลา"}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={fetchedAt}
+                  onSelect={setFetchedAt}
+                  autoFocus
+                />
+                <div className="border-t p-3">
+                  <Input
+                    type="time"
+                    value={fetchedAtTime}
+                    onChange={(e) => setFetchedAtTime(e.target.value)}
+                  />
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="temp">
-              Temp
-            </label>
-            <Input
-              id="temp"
-              type="number"
-              min="0"
-              step="0.01"
-              value={temp}
-              onChange={(event) => setTemp(event.target.value)}
+
+          {/* Numeric fields */}
+          {(Object.keys(FIELD_CONFIG) as FieldKey[]).map((key) => (
+            <NumericField
+              key={key}
+              fieldKey={key}
+              value={fields[key]}
+              onChange={setField(key)}
             />
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="dew_point">
-              Dew Point
-            </label>
-            <Input
-              id="dew_point"
-              type="number"
-              min="0"
-              step="0.01"
-              value={dewPoint}
-              onChange={(event) => setDewPoint(event.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="humidity">
-              Humidity
-            </label>
-            <Input
-              id="humidity"
-              type="number"
-              min="0"
-              step="0.01"
-              value={humidity}
-              onChange={(event) => setHumidity(event.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="pressure">
-              Pressure
-            </label>
-            <Input
-              id="pressure"
-              type="number"
-              min="0"
-              step="0.01"
-              value={pressure}
-              onChange={(event) => setPressure(event.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="wind_speed">
-              Wind Speed
-            </label>
-            <Input
-              id="wind_speed"
-              type="number"
-              min="0"
-              step="0.01"
-              value={windSpeed}
-              onChange={(event) => setWindSpeed(event.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="precipitation">
-              Precipitation
-            </label>
-            <Input
-              id="precipitation"
-              type="number"
-              min="0"
-              step="0.01"
-              value={precipitation}
-              onChange={(event) => setPrecipitation(event.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="wind_direction">
-              Wind Direction
-            </label>
-            <Input
-              id="wind_direction"
-              type="number"
-              min="0"
-              step="0.01"
-              value={windDirection}
-              onChange={(event) => setWindDirection(event.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium" htmlFor="fetched_at">
-              Fetched At
-            </label>
-            <Input
-              id="fetched_at"
-              type="datetime-local"
-              value={fetchedAt}
-              onChange={(event) => setFetchedAt(event.target.value)}
-            />
-          </div>
+          ))}
         </div>
 
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        {success ? <p className="text-sm text-green-600">{success}</p> : null}
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        {success && <p className="text-sm text-green-600">{success}</p>}
 
-        <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? "กำลังบันทึก..." : "บันทึกข้อมูล"}
-        </Button>
+        <div className="flex justify-end">
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting ? "กำลังบันทึก..." : "บันทึกข้อมูล"}
+          </Button>
+        </div>
       </form>
     </div>
   );
