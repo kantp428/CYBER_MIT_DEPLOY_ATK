@@ -1,13 +1,61 @@
-"use client"
+"use client";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 
 export default function LoginPage() {
-  const router = useRouter()
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [role, setRole] = useState("admin");
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError(null);
+    setIsSubmitting(true);
+
+    const formData = new FormData(event.currentTarget);
+    const username = String(formData.get("username") || "");
+    const password = String(formData.get("password") || "");
+
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password, role }),
+      });
+
+      if (!response.ok) {
+        setError("Username หรือ Password ไม่ถูกต้อง");
+        setIsSubmitting(false);
+        return;
+      }
+
+      const data = await response.json();
+      const token = String(data?.token || "");
+
+      if (token) {
+        localStorage.setItem("auth_token", token);
+      }
+
+      router.push("/");
+    } catch {
+      setError("Login ไม่สำเร็จ กรุณาลองใหม่");
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <div className="mx-auto flex min-h-screen w-full max-w-5xl items-center justify-center px-4 py-10">
@@ -20,7 +68,7 @@ export default function LoginPage() {
             </p>
           </div>
 
-          <form className="mt-6 space-y-4">
+          <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
             <div className="space-y-2">
               <label className="text-sm font-medium" htmlFor="username">
                 Username
@@ -54,8 +102,12 @@ export default function LoginPage() {
               />
             </div>
 
-            <Button className="w-full" type="submit" onClick={() => router.push("/")}>
-              Login
+            {error ? (
+              <p className="text-sm text-red-600">{error}</p>
+            ) : null}
+
+            <Button className="w-full" type="submit" disabled={isSubmitting}>
+              {isSubmitting ? "Checking..." : "Login"}
             </Button>
           </form>
 
