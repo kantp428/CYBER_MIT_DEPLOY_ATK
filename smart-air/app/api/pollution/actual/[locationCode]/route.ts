@@ -3,6 +3,8 @@ import { jwtVerify } from "jose";
 import { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
 
+export const runtime = "nodejs";
+
 interface ActualHistoryRow {
   id: number;
   location_id: number;
@@ -66,6 +68,11 @@ const requireAdminAuth = async (request: NextRequest) => {
   const cookieToken = request.cookies.get("auth_token")?.value;
   const token = bearerToken ?? cookieToken;
 
+  const internalKey = process.env.INTERNAL_API_KEY;
+  if (internalKey && bearerToken === internalKey) {
+    return null;
+  }
+
   if (!token) {
     return NextResponse.json({ message: "Missing token" }, { status: 401 });
   }
@@ -113,6 +120,10 @@ export async function GET(
   }
 
   try {
+    const { searchParams } = new URL(request.url);
+    const startDate = searchParams.get("start_date");
+    const endDate = searchParams.get("end_date");
+
     const location =
       (await prisma.location.findUnique({
         where: { code: locationCode },
@@ -130,26 +141,54 @@ export async function GET(
       );
     }
 
-    const rows = await prisma.$queryRaw<ActualHistoryRow[]>(Prisma.sql`
-      SELECT
-        a.id,
-        a.location_id,
-        DATE_FORMAT(a.date, '%Y-%m-%d') AS date,
-        a.pm,
-        a.temp,
-        a.dew_point,
-        a.humidity,
-        a.pressure,
-        a.wind_speed,
-        a.precipitation,
-        a.wind_direction,
-        a.fetched_at
-      FROM pm_actual a
-      INNER JOIN location l ON l.id = a.location_id
-      WHERE l.id = ${location.id}
-      ORDER BY a.date DESC
-      LIMIT 14
-    `);
+    let rows: ActualHistoryRow[] = [];
+
+    if (startDate || endDate) {
+      const start = startDate ?? "1900-01-01";
+      const end = endDate ?? "2999-12-31";
+
+      rows = await prisma.$queryRaw<ActualHistoryRow[]>(Prisma.sql`
+        SELECT
+          a.id,
+          a.location_id,
+          DATE_FORMAT(a.date, '%Y-%m-%d') AS date,
+          a.pm,
+          a.temp,
+          a.dew_point,
+          a.humidity,
+          a.pressure,
+          a.wind_speed,
+          a.precipitation,
+          a.wind_direction,
+          a.fetched_at
+        FROM pm_actual a
+        INNER JOIN location l ON l.id = a.location_id
+        WHERE l.id = ${location.id}
+          AND a.date BETWEEN CAST(${start} AS DATE) AND CAST(${end} AS DATE)
+        ORDER BY a.date ASC
+      `);
+    } else {
+      rows = await prisma.$queryRaw<ActualHistoryRow[]>(Prisma.sql`
+        SELECT
+          a.id,
+          a.location_id,
+          DATE_FORMAT(a.date, '%Y-%m-%d') AS date,
+          a.pm,
+          a.temp,
+          a.dew_point,
+          a.humidity,
+          a.pressure,
+          a.wind_speed,
+          a.precipitation,
+          a.wind_direction,
+          a.fetched_at
+        FROM pm_actual a
+        INNER JOIN location l ON l.id = a.location_id
+        WHERE l.id = ${location.id}
+        ORDER BY a.date DESC
+        LIMIT 14
+      `);
+    }
 
     return NextResponse.json({
       locationCode: location.code,
