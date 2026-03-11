@@ -18,6 +18,7 @@ const items = [
   { title: "Home", url: "/", icon: Home },
   { title: "Pollution", url: "/pollution", icon: CloudFog },
   { title: "information", url: "/information", icon: BadgeInfo },
+  { title: "settings", url: "/settings", icon: BadgeInfo },
 ];
 
   // const [isLogin,setIsLogin] = useState(false);

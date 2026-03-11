@@ -1,23 +1,18 @@
 import { SignJWT } from "jose";
 import { NextResponse } from "next/server";
-
-const MOCK_USERNAME = "SkyLine";
-const MOCK_PASSWORD = "SkyLine2026";
-const MOCK_ROLE = "admin";
-const MOCK_USER_ID = "1";
+import { MOCK_USERS } from "@/lib/mock-auth";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const username = String(body?.username || "");
     const password = String(body?.password || "");
-    const role = String(body?.role || "");
+    const user = MOCK_USERS.find(
+      (mockUser) =>
+        mockUser.username === username && mockUser.password === password,
+    );
 
-    if (
-      username !== MOCK_USERNAME ||
-      password !== MOCK_PASSWORD ||
-      role !== MOCK_ROLE
-    ) {
+    if (!user) {
       return NextResponse.json(
         { message: "Invalid credentials" },
         { status: 401 },
@@ -32,17 +27,26 @@ export async function POST(request: Request) {
       );
     }
 
-    const token = await new SignJWT({ role })
+    const token = await new SignJWT({ role: user.role })
       .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-      .setSubject(MOCK_USER_ID)
+      .setSubject(user.id)
       .setIssuedAt()
       .setExpirationTime("2h")
       .sign(new TextEncoder().encode(secret));
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       token,
-      user: { id: MOCK_USER_ID, username, role },
+      user: { id: user.id, username: user.username, role: user.role },
     });
+    response.cookies.set("auth_token", token, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 60 * 60 * 2,
+      path: "/",
+    });
+
+    return response;
   } catch (error) {
     console.error("Login failed", error);
     return NextResponse.json(

@@ -3,13 +3,6 @@ import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -18,7 +11,6 @@ export default function LoginPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [role, setRole] = useState("admin");
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -33,7 +25,8 @@ export default function LoginPage() {
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password, role }),
+        credentials: "include",
+        body: JSON.stringify({ username, password }),
       });
 
       if (!response.ok) {
@@ -44,10 +37,6 @@ export default function LoginPage() {
 
       const data = await response.json();
       const token = String(data?.token || "");
-
-      if (token) {
-        localStorage.setItem("auth_token", token);
-      }
 
       router.push("/");
     } catch {
@@ -95,7 +84,7 @@ export default function LoginPage() {
                 type="password"
                 autoComplete="current-password"
                 placeholder="••••••••"
-                pattern="^[A-Za-z0-9]{1,20}$"
+                pattern="^[A-Za-z0-9]+$"
                 title="Password must be 1-20 characters and use letters and numbers only."
                 maxLength={20}
                 required
