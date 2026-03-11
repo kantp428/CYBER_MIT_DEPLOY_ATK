@@ -31,10 +31,7 @@ export async function GET(request: Request) {
   const respondWithFallback = (error: unknown) => {
     console.error("Detail lookup failed", error);
     const fallback = FALLBACK_DETAIL_MAP.get(`${type}:${id}`);
-    if (fallback) {
-      return NextResponse.json(fallback);
-    }
-
+    if (fallback) return NextResponse.json(fallback);
     return NextResponse.json(
       { message: "Unable to load detail data" },
       { status: 500 },
@@ -45,7 +42,7 @@ export async function GET(request: Request) {
     if (type === "ACTUAL") {
       const actualRows = await prisma.$queryRaw<ActualDetailRow[]>(Prisma.sql`
         SELECT
-          date::text AS date,
+          DATE_FORMAT(date, '%Y-%m-%d') AS date,
           pm,
           temp,
           humidity,
@@ -74,16 +71,16 @@ export async function GET(request: Request) {
     }
 
     if (type === "PREDICTED") {
-      const predictionRows = await prisma.$queryRaw<PredictedDetailRow[]>(
-        Prisma.sql`
-          SELECT
-            predicted_for::text AS date,
-            pm_predicted
-          FROM pm_prediction
-          WHERE id = ${id}
-          LIMIT 1
-        `,
-      );
+      const predictionRows = await prisma.$queryRaw<
+        PredictedDetailRow[]
+      >(Prisma.sql`
+        SELECT
+          DATE_FORMAT(predicted_for, '%Y-%m-%d') AS date,
+          pm_predicted
+        FROM pm_prediction
+        WHERE id = ${id}
+        LIMIT 1
+      `);
       const prediction = predictionRows[0];
 
       if (!prediction) {
